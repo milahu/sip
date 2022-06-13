@@ -79,7 +79,7 @@ def create_distinfo(distinfo_dir, wheel_tag, installed, metadata,
         generator = os.path.basename(sys.argv[0])
 
     # The prefix directory corresponds to DESTDIR or INSTALL_ROOT.
-    real_distinfo_dir = prefix_dir + distinfo_dir
+    real_distinfo_dir = os.path.join(prefix_dir, distinfo_dir)
 
     # Make sure we have an empty dist-info directory.  Handle exceptions as the
     # user may be trying something silly with a system directory.
@@ -108,7 +108,7 @@ def create_distinfo(distinfo_dir, wheel_tag, installed, metadata,
         installer_fn = os.path.join(distinfo_dir, 'INSTALLER')
         installed.append(installer_fn)
 
-        with open(prefix_dir + installer_fn, 'w') as installer_f:
+        with open(os.path.join(prefix_dir, installer_fn), 'w') as installer_f:
             print(generator, file=installer_f)
     else:
         # Define any entry points.
@@ -116,7 +116,7 @@ def create_distinfo(distinfo_dir, wheel_tag, installed, metadata,
             eps_fn = os.path.join(distinfo_dir, 'entry_points.txt')
             installed.append(eps_fn)
 
-            with open(prefix_dir + eps_fn, 'w') as eps_f:
+            with open(os.path.join(prefix_dir, eps_fn), 'w') as eps_f:
                 if console_scripts:
                     eps_f.write(
                             '[console_scripts]\n' + '\n'.join(
@@ -136,7 +136,7 @@ Tag: {}
         wheel_fn = os.path.join(distinfo_dir, 'WHEEL')
         installed.append(wheel_fn)
 
-        with open(prefix_dir + wheel_fn, 'w') as wheel_f:
+        with open(os.path.join(prefix_dir, wheel_fn), 'w') as wheel_f:
             wheel_f.write(
                     WHEEL.format(WHEEL_VERSION, generator, SIP_VERSION_STR,
                             wheel_tag))
@@ -151,11 +151,11 @@ Tag: {}
     record_fn = os.path.join(distinfo_dir, 'RECORD')
 
     distinfo_path, distinfo_base = os.path.split(distinfo_dir)
-    real_distinfo_path = os.path.normcase(prefix_dir + distinfo_path)
+    real_distinfo_path = os.path.normcase(os.path.join(prefix_dir, distinfo_path))
 
-    with open(prefix_dir + record_fn, 'w') as record_f:
+    with open(os.path.join(prefix_dir, record_fn), 'w') as record_f:
         for name in installed:
-            real_name = prefix_dir + name
+            real_name = os.path.join(prefix_dir, name)
             if os.path.isdir(real_name):
                 all_fns = []
 
@@ -177,7 +177,7 @@ Tag: {}
 
                 if norm_fn.startswith(real_distinfo_path):
                     fn_name = fn[len(real_distinfo_path) + 1:].replace('\\', '/')
-                elif norm_fn.startswith(prefix_dir + sys.prefix):
+                elif norm_fn.startswith(os.path.join(prefix_dir, sys.prefix)):
                     fn_name = os.path.relpath(
                             fn, real_distinfo_path).replace('\\', '/')
                 else:
@@ -207,7 +207,7 @@ def write_metadata(metadata, requires_dists, metadata_fn, project_root,
 
         metadata['requires-dist'] = requires_dists + rd
 
-    with open(prefix_dir + metadata_fn, 'w') as metadata_f:
+    with open(os.path.join(prefix_dir, metadata_fn), 'w') as metadata_f:
         description = None
 
         for name, value in metadata.items():
