@@ -27,6 +27,10 @@ import os
 import shutil
 import stat
 import sys
+import multiprocessing
+import pickle
+import time
+import io
 
 from .abstract_builder import AbstractBuilder
 from .buildable import BuildableFromSources
@@ -266,18 +270,22 @@ class Builder(AbstractBuilder):
         # Generate the code for each set of bindings.
         api_files = []
 
-        for bindings in project.bindings.values():
+        # Note: Codegen must run in order
+        # Example, codegen for QtCore must run before QtOpenGL
+        # Codegen runs in parallel anyway, so this is not hurting perf
+        print(f"Generating {len(project.bindings)} bindings ...")
+        for binding in project.bindings.values():
             project.progress(
-                    "Generating the {0} bindings".format(bindings.name))
+                    "Generating the {0} bindings".format(binding.name))
 
             # Generate the source code.  We would prefer to pass the include
             # directories as an argument to generate but this is a fixed public
             # interface.
-            bindings._sip_include_dirs = sip_include_dirs
-            buildable = bindings.generate()
-            del bindings._sip_include_dirs
+            binding._sip_include_dirs = sip_include_dirs # TODO is this mutated in generate?
+            buildable = binding.generate()
+            del binding._sip_include_dirs
 
-            if not bindings.internal:
+            if not binding.internal:
                 api_files.append(
                         os.path.join(project.build_dir,
                                 buildable.target + '.api'))
@@ -287,6 +295,7 @@ class Builder(AbstractBuilder):
                     buildable.write_configuration(local_bindings_dir)
 
             project.buildables.append(buildable)
+
 
         # Create __init__.py if required.
         if project.dunder_init:
