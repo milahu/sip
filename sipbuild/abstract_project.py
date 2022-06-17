@@ -112,16 +112,31 @@ class AbstractProject(ABC):
 
             module_name = name[:-3]
             object_name = None
+            module = None
 
-            # Try and import the .py file.
-            spec = importlib.util.spec_from_file_location(module_name, name)
-            module = importlib.util.module_from_spec(spec)
+            # try to import project from $PYTHONPATH
+            # -> export PYTHONPATH="$PWD:$PYTHONPATH"
+            # where $PWD is the folder with project.py
+            if module_name == "project":
+                try:
+                    import project
+                    # static import -> enable parallel configure + codegen
+                    # check later with pickle.dumps
+                    module = project
+                except ImportError:
+                    pass
 
-            try:
-                spec.loader.exec_module(module)
-            except Exception as e:
-                raise UserException("Unable to import '{0}'".format(name),
-                        detail=str(e))
+            if module is None:
+                # Try and import the .py file.
+                spec = importlib.util.spec_from_file_location(module_name, name)
+                module = importlib.util.module_from_spec(spec)
+
+                try:
+                    spec.loader.exec_module(module)
+                except Exception as e:
+                    raise UserException("Unable to import '{0}'".format(name),
+                            detail=str(e))
+
         else:
             # Extract the module and any object name.
             parts = name.split(':')
@@ -133,13 +148,27 @@ class AbstractProject(ABC):
             module_name = parts[0]
             object_name = parts[1] if len(parts) == 2 else None
 
-            # Try and import the module.
-            try:
-                module = importlib.import_module(module_name)
-            except ImportError as e:
-                raise UserException(
-                        "Unable to import '{0}'".format(module_name),
-                        detail=str(e))
+            # try to import project.py from $PYTHONPATH
+            # -> export PYTHONPATH="$PWD:$PYTHONPATH" (or similar)
+            module = None
+            if module_name == "project":
+                try:
+                    import project
+                    # this "static import" of project allows parallel configure + codegen
+                    print(f"sipbuild/abstract_project.py: import_callable: import project: ok")
+                    module = project
+                except ImportError as e:
+                    print(f"sipbuild/abstract_project.py: import_callable: import project: fail")
+                    pass
+
+            if module is None:
+                # Try and import the module.
+                try:
+                    module = importlib.import_module(module_name)
+                except ImportError as e:
+                    raise UserException(
+                            "Unable to import '{0}'".format(module_name),
+                            detail=str(e))
 
         # Get the callable object from the module.
         if object_name is None:

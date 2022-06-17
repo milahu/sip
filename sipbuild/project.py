@@ -30,6 +30,10 @@ import sys
 import sysconfig
 import tempfile
 import warnings
+import multiprocessing
+import pickle
+import io
+import time
 
 from .abstract_builder import AbstractBuilder
 from .abstract_project import AbstractProject
@@ -40,6 +44,44 @@ from .module import resolve_abi_version
 from .py_versions import OLDEST_SUPPORTED_MINOR
 from .pyproject import (PyProjectException, PyProjectOptionException,
         PyProjectUndefinedOptionException)
+
+
+# Checking bindings is CPU-bound -> use multiprocess, not threads
+def update_buildable_bindings_worker(binding):
+    name = binding.name
+    print(f"Checking the {name} bindings ...")
+    sys.stdout.flush()
+    # note: dont patch sys.stdout
+    # as sys.stdout.encoding is needed in: yield str(line
+    outbuf = io.StringIO()
+    sys.stdout.write = outbuf.write
+    sys.stderr.write = outbuf.write
+
+    t1 = time.time()
+    is_buildable = binding.is_buildable()
+    t2 = time.time()
+
+    dt = t2 - t1
+    output = outbuf.getvalue()
+    return (binding, is_buildable, output, dt)
+
+
+def print_message_serial_processing():
+    print()
+    print("sipbuild: slow path. will configure and generate bindings by serial processing.")
+    print("To enable parallel configure and generate, try adding this to your build env:")
+    print('  export PYTHONPATH="$PWD:$PYTHONPATH"')
+    print("... where $PWD is the directory of your project.py file.")
+    print()
+
+
+def print_message_parallel_processing():
+    print()
+    print("sipbuild: fast path. will configure and generate bindings by parallel processing.")
+    print("This is experimental and may cause build errors.")
+    print("To force serial configure, run:")
+    print('  SIP_SERIAL_CONFIGURE=1 sip')
+    print()
 
 
 class Project(AbstractProject, Configurable):
@@ -650,9 +692,105 @@ class Project(AbstractProject, Configurable):
         if self.enable:
             return
 
-        for b in list(self.bindings.values()):
-            if not b.is_buildable():
-                del self.bindings[b.name]
+        if False:
+            # debug: build only some bindings
+            build_only_n_bindings = 3
+            for key in list(self.bindings.keys())[build_only_n_bindings:]:
+                del self.bindings[key]
+
+        # TODO use option --jobs
+        num_jobs = 1
+        max_num_jobs = multiprocessing.cpu_count()
+
+        # nix
+        if os.environ.get("enableParallelBuilding", False):
+            n = os.environ.get("NIX_BUILD_CORES", None)
+            if n:
+                num_jobs = int(n)
+
+        num_jobs = min(num_jobs, max_num_jobs) # sanitize
+
+        enable_parallel = False
+        try:
+            # pickle fails with dynamic import
+            # see abstract_project.py -> def import_callable
+            # multiprocessing uses pickle for IPC
+            pickle.dumps(self.bindings)
+            enable_parallel = True
+        except pickle.PicklingError:
+            pass
+
+        binding_is_buildable = dict()
+
+        if os.environ.get("SIP_SERIAL_CONFIGURE"):
+            enable_parallel = False
+
+        if not enable_parallel or num_jobs == 1:
+            # serial processing
+            print()
+            print(f"Checking {len(self.bindings)} bindings with serial processing.")
+            print_message_serial_processing()
+            print()
+            for b in list(self.bindings.values()):
+                is_buildable = b.is_buildable()
+                binding_is_buildable[b.name] = is_buildable
+
+        else:
+            # parallel processing
+            # TODO freeze binding.project before passing to parallel worker
+            # mutating project from worker is not supported
+            # https://stackoverflow.com/questions/30190069/make-an-object-immutable
+            print_message_parallel_processing()
+            updated_bindings = dict()
+            pool = multiprocessing.Pool(num_jobs)
+            bindings_list = list(self.bindings.values())
+            print()
+            print(f"Checking {len(bindings_list)} bindings with parallel processing in {num_jobs} processes ...")
+            print()
+            sys.stdout.flush() # flush before patching sys.stdout.write
+
+            # Check bindings
+            is_buildable_iter = pool.imap_unordered(update_buildable_bindings_worker, bindings_list)
+
+            t1 = time.time()
+            dt_cpu = 0
+            for (binding, is_buildable, output, dt) in is_buildable_iter:
+                name = binding.name
+                binding_is_buildable[name] = is_buildable
+                updated_bindings[name] = binding
+                dt_cpu += dt
+                print()
+                print(output)
+                print(f"Checking the {name} bindings done after {dt:.2f} seconds.")
+
+                if is_buildable:
+                    print(f"The {name} bindings can be built.")
+                else:
+                    print(f"The {name} bindings can not be built.")
+                print()
+                print(f"Checking done for {len(binding_is_buildable)} of {len(bindings_list)} bindings.")
+                print()
+            t2 = time.time()
+            dt = t2 - t1
+            print(f"Checking done for all bindings.")
+            print()
+            print(f"Checking {len(bindings_list)} bindings took {dt:.2f} seconds.")
+            print()
+            # worker can mutate bindings
+            # example: modify binding.disabled_features
+            # -> return mutated bindings back to project
+
+            for name in self.bindings.keys():
+                self.bindings[name] = updated_bindings[name]
+
+        # keep all binding names for "Configure summary"
+        self.all_binding_names = list(self.bindings.keys())
+
+        # checking done. now we can mutate self.bindings
+        for name in self.all_binding_names:
+            is_buildable = binding_is_buildable[name]
+            if not is_buildable:
+                del self.bindings[name]
 
         if len(self.bindings) == 0:
             raise UserException("There are no bindings that can be built")

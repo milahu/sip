@@ -162,6 +162,7 @@ class Bindings(Configurable):
         """
 
         project = self.project
+        # NOTE project must be read-only for parallel processing
 
         # The old parser had no concept of the encoding of a .sip file.  For
         # the moment we say that files should be UTF-8.  If that proves to be a
