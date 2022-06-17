@@ -564,6 +564,7 @@ class Project(AbstractProject, Configurable):
         for line in self.read_command_pipe(args, and_stderr=True, fatal=fatal):
             if self.verbose:
                 sys.stdout.write(line)
+                sys.stdout.flush() # unbuffer output from make
 
     def setup(self, pyproject, tool, tool_description):
         """ Complete the configuration of the project. """
