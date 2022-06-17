@@ -164,6 +164,7 @@ class Project(AbstractProject, Configurable):
         self.root_dir = os.getcwd()
         self.bindings = collections.OrderedDict()
         self.bindings_factories = []
+        self.all_binding_names = []
         self.builder = None
         self.buildables = []
         self.installables = []
@@ -617,9 +618,18 @@ class Project(AbstractProject, Configurable):
         self.verify_configuration(tool)
 
         if tool in Option.BUILD_TOOLS and self.bindings:
-            self.progress(
-                    "These bindings will be built: {}.".format(
-                            ', '.join(self.bindings.keys())))
+            print("\n\n" + "---- Configure summary ----")
+            print("\n" + "These bindings will be built:" + "\n")
+            for name in self.all_binding_names:
+                is_buildable = name in self.bindings
+                x = "x" if is_buildable else " "
+                disabled_features_str = ""
+                if is_buildable:
+                    binding = self.bindings[name]
+                    if binding.disabled_features:
+                        disabled_features_str = ". disabled features: " + ", ".join(binding.disabled_features)
+                print(f"  [{x}] {name}{disabled_features_str}")
+            print("\n")
 
     def update(self, tool):
         """ This should be re-implemented by any user supplied sub-class to
